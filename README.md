@@ -5,12 +5,16 @@
 ## 业务场景与工作流
 模拟客户：砚泉研究协作组，12位业务与分析人员。每月研究明细先从`yield-vintages-202611.csv`录入底稿，经口径冻结、Python核算、负责人复核后向业务阅读者交付站内CSV。原有流程依靠人工表格抄算，痛点为口径版本难追溯、重复计算易错、复核与交付脱节。
 
-模块：业务总览、业务底稿、新建口径版本、异步核算与复核、定时交付、站内收件箱、审计。底稿可新增/修改/删除；口径仅新增版本；报告提交时冻结来源与版本并保存SHA256。定时交付引用已复核报告快照，worker到期写入数据库，业务阅读者下载。
+模块：业务总览、业务底稿、抽检导入、新建口径版本、抽检对账、异步核算与复核、定时交付、站内收件箱、审计。底稿可新增/修改/删除；口径仅新增版本；报告与对账提交时冻结输入与版本并保存SHA256。定时交付引用已复核报告快照，worker到期写入数据库，业务阅读者下载。
+
+抽检对账：抽检单按所选期间导入，批号只作单据标识、不与底稿按行认领（批号对不上时按行认领会串批）。候选配对要求同期间、同试制线、同班次，且投入数相差不超过10件。先在候选图上求全批一对一最大配对，再只保留“每一种最大配对方案中都相同”的配对进入良率核算；其余配对逐条列为未定并给出候选与原因。对账排队时冻结底稿、抽检单与口径版本快照，worker执行期间底稿被并发更正也不影响本次结果。计算按日期×试制线×班次分组落库断点，中断后重试复用已完成分组，不会重复计批；失败或中断的对账可在页面重试。
 
 ## 算法口径
 版本化良率分母规则、加权汇总与按线/班次差异归因。分母规则手算；大批小批汇总不能均值；更新规则旧run不变。
 
 口径版本冻结 · 汇总按分母加权。输入：业务底稿与口径JSON；输出：summary、透视rows、method、warnings。算法实现在`backend/src/services/calculation.py`，输入校验在`validation.py`。固定seed=42，240条合成数据；未对接真实业务系统。修改源数据和新建因子/口径不会改变已提交报告。
+
+抽检配对算法在`backend/src/services/pairing.py`：迭代增广路求最大基数配对；对最大配对建交替有向图，用强连通分量与“空闲左点可达/可达空闲右点”判定每条匹配边是否在所有最大方案中必然出现。判定条件已用穷举所有配对方案的随机图测试验证。良率只累计确定配对：分子按冻结口径（一次通过或含返工合格），分母按口径（全部投入或投入减报废），汇总为分子合计/分母合计。
 
 ## 一天的验收剧本
 1. 09:00 admin查看240条seed底稿与具名业务期间。
@@ -21,6 +25,10 @@
 6. 09:40 admin核对数值后填写至少4字复核说明。
 7. 09:45 admin建立60秒周期计划，worker到期生成站内持久化交付。
 8. 09:46 viewer在站内收件箱下载交付CSV；审计页查看操作者与时间。
+9. 09:50 analyst选择期间导入抽检单 CSV（日期列可省略，一律采用所选期间）。
+10. 09:55 analyst命名一次抽检对账，选择期间与口径版本并排队；worker 按日期×线×班次配对与核算。
+11. 09:56 页面查看排队/对账中/已完成或失败；展开未定配对查看候选与原因；完成后下载确定配对CSV。
+12. 10:05 若对账中途失败或中断，点击重试；已完成分组直接复用，不重复计批。
 
 ## 快速启动
 ```sh
@@ -32,8 +40,8 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 |角色|邮箱|密码|权限|
 |---|---|---|---|
-|admin|admin@demo.local|Demo2026!|全部底稿、口径版本、核算、复核、调度|
-|analyst|analyst@demo.local|Demo2026!|底稿增改删、核算、导出；无复核/调度/口径写权限|
+|admin|admin@demo.local|Demo2026!|全部底稿、抽检单、口径版本、对账、核算、复核、调度|
+|analyst|analyst@demo.local|Demo2026!|底稿增改删、抽检导入、对账、核算、导出；无复核/调度/口径写权限|
 |viewer|viewer@demo.local|Demo2026!|只读；仅可下载已复核报告与站内交付|
 
 ## 工程结构与开发
@@ -44,11 +52,11 @@ Python3.11/FastAPI/SQLAlchemy/Redis，MySQL8；前端原生HTML/CSS/JS ES module
 环境变量：COMPOSE_PROJECT_NAME、FRONTEND_PORT、BACKEND_PORT、DB_PORT、JWT_SECRET（部署替换）、DATABASE_URL、REDIS_URL、SEED_DEMO。`.env`不入Git。数据库/Redis/共享产物为命名卷。共享角色枚举admin/analyst/viewer与状态queued/running/completed/failed分别定义于backend/src/constants/enums.py和frontend/src/constants/enums.js。两个中间件：统一可恢复校验错误、每IP每分钟360请求限流。
 
 ## 已知边界
-定时分发为站内收件箱；一名worker轮询执行，无外部邮件。调度发送已复核固定报告快照，不自动重算新数据。时间显示Asia/Shanghai。报告导出适合小型数据；底稿全量加载240行演示数据。Google Fonts不可用时回退serif。后端API以专属字段对象收发，页面通过业务输入控件编辑，不要求用户写JSON。新增来源期间自动可选；专属字段和算法严格校验。JWT演示有效期2小时。
+定时分发为站内收件箱；一名worker轮询执行报告与对账两类队列，无外部邮件。调度发送已复核固定报告快照，不自动重算新数据。抽检对账只在同线同班的候选内求最大配对，跨线/跨班不强行配对；确定配对的良率只代表可唯一认定部分，未定记录需人工核对或补录抽检单。running 超过120秒视为中断由worker自动回收重排，queued 超过120秒重新入队；重复入队由原子认领吸收。时间显示Asia/Shanghai。报告导出适合小型数据；底稿全量加载240行演示数据。Google Fonts不可用时回退serif。后端API以专属字段对象收发，页面通过业务输入控件编辑，不要求用户写JSON。新增来源期间自动可选；专属字段和算法严格校验。JWT演示有效期2小时。
 
 MIT License。
 
 ## 实际实体映射
-来源记录（Source，专属业务字段校验）、口径版本（Policy）、核算报告（Run）、交付计划（Schedule）、交付（Delivery）均经数据库→模型→请求schema→service→route/controller→frontend API→store→page。Period为已有来源期间字典，在任务期间选择器使用；不单独作为复杂度计数。底稿JSON为小型多字段单记录存储，不虚构未落库的子实体。
+来源记录（Source，专属业务字段校验）、抽检单（Inspection）、抽检对账（Reconciliation，含分组断点 ReconciliationGroup）、口径版本（Policy）、核算报告（Run）、交付计划（Schedule）、交付（Delivery）均经数据库→模型→请求schema→service→route/controller→frontend API→store→page。Period为已有来源期间字典，在任务期间选择器使用；不单独作为复杂度计数。底稿JSON为小型多字段单记录存储，不虚构未落库的子实体。
 
-实际表：期间字典 yield_periods；专属来源 yield_lots；冻结口径 denominator_policies；异步报告 yield_runs。
+实际表：期间字典 yield_periods；专属来源 yield_lots；抽检单 yield_inspections；对账与分组断点 yield_reconciliations / yield_reconciliation_groups；冻结口径 denominator_policies；异步报告 yield_runs；交付计划/交付 delivery_schedules / deliveries。后端测试在 backend/tests，运行 `python -m pytest`。

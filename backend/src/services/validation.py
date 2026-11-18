@@ -14,3 +14,12 @@ def validate_policy(d):
  if not isinstance(d,dict) or not isinstance(d.get('version'),str) or not 2<=len(d['version'])<=120: raise ValueError('口径版本名不合法')
  if d.get('numerator') not in ('first_pass','total_good') or d.get('denominator') not in ('input','non_scrap'):raise ValueError('分子分母口径无效')
  if not isinstance(d.get('description'),str):raise ValueError('必须填写口径说明')
+
+
+def validate_inspection(d):
+ if not isinstance(d,dict) or set(d)!=set(CONFIG['inspection_fields']): raise ValueError('抽检单字段必须为批号、日期、试制线、班次、投入数')
+ if not isinstance(d['batch_no'],str) or not 1<=len(d['batch_no'])<=60: raise ValueError('抽检单批号不能为空或过长')
+ for key in ('period','department','shift'):
+  if not isinstance(d[key],str) or not 1<=len(d[key])<=100: raise ValueError(key+'不能为空或过长')
+ number(d['input'],'投入数',integer=True)
+ if d['input']<=0: raise ValueError('抽检投入必须大于0')

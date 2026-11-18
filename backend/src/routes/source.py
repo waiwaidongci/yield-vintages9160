@@ -11,8 +11,8 @@ router=APIRouter()
 def sources(db=Depends(database),u=Depends(current)): return [row(x) for x in db.query(Source).order_by(Source.id).all()]
 @router.get('/periods')
 def periods(db=Depends(database),u=Depends(current)):
- names=sorted({x.data['period'] for x in db.query(Source).all()})
- return [{'id':i+1,'name':name,'description':'当前来源期间'} for i,name in enumerate(names)]
+ names={x.data['period'] for x in db.query(Source).all()}|{x.name for x in db.query(Period).all()}
+ return [{'id':i+1,'name':name,'description':'当前来源期间'} for i,name in enumerate(sorted(names))]
 @router.post('/sources')
 def create(b:DataInput,db=Depends(database),u=Depends(editor)): return row(save_source(db,u,b.data))
 @router.put('/sources/{id}')

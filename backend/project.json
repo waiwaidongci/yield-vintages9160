@@ -4,7 +4,7 @@
   "title": "砚泉试制良率口径簿",
   "slug": "yield-vintages",
   "algorithm": "版本化良率分母规则、加权汇总与按线/班次差异归因",
-  "entities": "YieldLot / DenominatorPolicy / YieldRun / Approval / DeliverySchedule",
+  "entities": "YieldLot / Inspection / Reconciliation / DenominatorPolicy / YieldRun / Approval / DeliverySchedule",
   "scenario": "试制批次一次通过/返工/报废→冻结口径版本与加权透视→主管复核交付；历史快照不随口径改写",
   "visual": "质检印章、栗棕朱红",
   "oracle": "分母规则手算；大批小批汇总不能均值；更新规则旧run不变",
@@ -45,5 +45,14 @@
     "0.52 0.15 28"
   ],
   "caption": "口径版本冻结 · 汇总按分母加权",
-  "unit": "%"
+  "unit": "%",
+  "inspection_label": "抽检对账",
+  "max_input_diff": 10,
+  "inspection_fields": {
+    "batch_no": "抽检单批号",
+    "period": "日期",
+    "department": "试制线",
+    "shift": "班次",
+    "input": "投入数"
+  }
 }
